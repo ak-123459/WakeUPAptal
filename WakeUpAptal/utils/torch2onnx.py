@@ -1,5 +1,10 @@
 import torch
 import torch.onnx
+from typing import Tuple
+import torch.nn as nn
+
+
+
 from model import WakeWordModel, load_pretrained_model
 
 def convert_pt_to_onnx(
@@ -115,9 +120,9 @@ def verify_onnx_model(onnx_path: str, dummy_input: torch.Tensor, original_model:
 # Example usage:
 if __name__ == "__main__":
     convert_pt_to_onnx(
-        pt_model_path="path/to/your/trained_model.pt",
-        onnx_model_path="wake_word_model.onnx",
-        pretrained_path="path/to/pretrained_model.pt",
+        pt_model_path="/content/new_trained_model (1).pt",
+        onnx_model_path="hello_aptal.onnx",
+        pretrained_path="/content/BOIG/WakeUpAptal/pretrained/pretrained-model.pt",
         input_shape=(1, 101, 40),  # Your input shape
         num_classes=2,
         freeze_conv=True,
