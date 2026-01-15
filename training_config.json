@@ -1,0 +1,20 @@
+{
+  "positive_dir": "production_dataset/positive",
+  "negative_dir": "production_dataset/negative",
+  "pretrained_model_path": "/content/google-speech-dataset.pt",
+  "max_samples_per_class": 1000,
+  "training_parameters": {
+    "batch_size": 32,
+    "num_epochs": 10,
+    "learning_rate": 0.0005,
+    "weight_decay": 0.0001,
+    "dropout": 0.5
+  },
+  "splits": {
+    "val_split": 0.2,
+    "test_split": 0.1
+  },
+  "early_stopping": {
+    "patience": 5
+  }
+}
