@@ -3,8 +3,6 @@ import torch.onnx
 from typing import Tuple
 import torch.nn as nn
 
-
-
 from model import WakeWordModel, load_pretrained_model
 
 def convert_pt_to_onnx(
@@ -17,20 +15,6 @@ def convert_pt_to_onnx(
     dropout: float = 0.5,
     opset_version: int = 11
 ):
-    """
-    Convert .pt model to ONNX format
-    
-    Args:
-        pt_model_path: Path to your trained .pt model
-        onnx_model_path: Output path for ONNX model (e.g., 'model.onnx')
-        pretrained_path: Path to pretrained model
-        input_shape: Model input shape (channels, height, width)
-        num_classes: Number of output classes
-        freeze_conv: Whether conv layers were frozen
-        dropout: Dropout rate used in model
-        opset_version: ONNX opset version (11 or higher recommended)
-    """
-    
     # 1. Load pretrained model
     pretrained_model = load_pretrained_model(pretrained_path, device='cpu')
     
@@ -43,46 +27,82 @@ def convert_pt_to_onnx(
         dropout=dropout
     )
     
-    # 3. Load trained weights
+    # 3. Load trained classifier weights
     checkpoint = torch.load(pt_model_path, map_location='cpu')
-    
-    # Handle different checkpoint formats
     if isinstance(checkpoint, dict):
-        if 'model_state_dict' in checkpoint:
-            model.load_state_dict(checkpoint['model_state_dict'])
-        elif 'state_dict' in checkpoint:
-            model.load_state_dict(checkpoint['state_dict'])
-        else:
-            model.load_state_dict(checkpoint)
+        state_dict = checkpoint.get('model_state_dict', checkpoint.get('state_dict', checkpoint))
     else:
-        model.load_state_dict(checkpoint)
+        state_dict = checkpoint
     
-    # 4. Set to evaluation mode
+    model.load_state_dict(state_dict, strict=False)
+    
+    # 🔥 DEBUG: Check actual parameter count
+    total_params = sum(p.numel() for p in model.parameters())
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    
+    print(f"Total parameters: {total_params:,}")
+    print(f"Trainable parameters: {trainable_params:,}")
+    print(f"Model state_dict keys: {len(model.state_dict())}")
+    
+    # Print layer names to see what's included
+    print("\nModel layers:")
+    for name, module in model.named_children():
+        num_params = sum(p.numel() for p in module.parameters())
+        print(f"  - {name}: {num_params:,} parameters")
+    
+    # 4. UNFREEZE everything for export
+    for param in model.parameters():
+        param.requires_grad = True
+    
+    # 5. Evaluation mode
     model.eval()
     
-    # 5. Create dummy input (batch_size=1, channels, height, width)
+    # 6. Create dummy input
     dummy_input = torch.randn(1, *input_shape)
     
-    # 6. Export to ONNX
-    torch.onnx.export(
-        model,                          # Model
-        dummy_input,                    # Model input
-        onnx_model_path,               # Output file
-        export_params=True,             # Store trained weights
-        opset_version=opset_version,   # ONNX version
-        do_constant_folding=True,       # Optimize constants
-        input_names=['input'],          # Input name
-        output_names=['output'],        # Output name
-        dynamic_axes={                  # Variable batch size
-            'input': {0: 'batch_size'},
-            'output': {0: 'batch_size'}
-        }
-    )
+    # 7. Test forward pass
+    with torch.no_grad():
+        output = model(dummy_input)
+        print(f"\nTest output shape: {output.shape}")
     
-    print(f"✅ Model converted successfully!")
-    print(f"   Saved to: {onnx_model_path}")
+    # 8. Export to ONNX with LEGACY exporter
+    import os
     
-    # 7. Verify the model
+    print("\n🔧 Exporting with LEGACY exporter (dynamo=False)...")
+    
+    # 🔥 KEY FIX: Use context manager to disable dynamo
+    with torch.no_grad():
+        # Force legacy exporter by using dynamo=False
+        torch.onnx.export(
+            model,
+            dummy_input,
+            onnx_model_path,
+            export_params=True,              # ✅ Must be True
+            opset_version=opset_version,
+            do_constant_folding=True,
+            input_names=['input'],
+            output_names=['output'],
+            dynamic_axes={
+                'input': {0: 'batch_size'},
+                'output': {0: 'batch_size'}
+            },
+            dynamo=False,                     # 🔥 Disable dynamo
+            verbose=False                     # Set to True for debugging
+        )
+    
+    onnx_size = os.path.getsize(onnx_model_path) / (1024 * 1024)
+    print(f"\n✅ Model converted!")
+    print(f"   ONNX size: {onnx_size:.2f} MB")
+    
+    # Expected size check
+    expected_size_mb = total_params * 4 / (1024 * 1024)
+    print(f"   Expected size: ~{expected_size_mb:.2f} MB")
+    
+    if onnx_size < expected_size_mb * 0.8:
+        print("⚠️  WARNING: ONNX file is smaller than expected!")
+    else:
+        print("✅ Size looks correct!")
+    
     verify_onnx_model(onnx_model_path, dummy_input, model)
 
 
@@ -123,9 +143,9 @@ if __name__ == "__main__":
         pt_model_path="/content/new_trained_model (1).pt",
         onnx_model_path="hello_aptal.onnx",
         pretrained_path="/content/BOIG/WakeUpAptal/pretrained/pretrained-model.pt",
-        input_shape=(1, 101, 40),  # Your input shape
+        input_shape=(1, 101, 40),
         num_classes=2,
         freeze_conv=True,
         dropout=0.5,
-        opset_version=11
+        opset_version=11,  # Use 11-14 for better legacy support
     )
